@@ -61,6 +61,24 @@ vec_dist :: proc(v1, v2: rl.Vector2) -> f32 {
 	return math.sqrt(dx * dx + dy * dy)
 }
 
+Timer :: struct {
+	time:     f32,
+	max_time: f32,
+	finished: bool,
+}
+
+create_timer :: proc(max_time: f32) -> Timer {
+	return Timer{time = 0.0, max_time = max_time, finished = false}
+}
+
+update_timer :: proc(timer: ^Timer, dt: f32) -> bool {
+	timer.time += dt
+	if timer.time >= timer.max_time {
+		timer.finished = true
+	}
+	return timer.finished
+}
+
 Player :: struct {
 	pos:     rl.Vector2,
 	radius:  f32,
@@ -111,14 +129,21 @@ update_player :: proc(player: ^Player, dt: f32) {
 }
 
 Bullet :: struct {
-	dir:   rl.Vector2,
-	pos:   rl.Vector2,
-	speed: f32,
-	color: rl.Color,
+	dir:    rl.Vector2,
+	pos:    rl.Vector2,
+	radius: f32,
+	speed:  f32,
+	color:  rl.Color,
 }
 
 create_bullet :: proc(pos, dir: rl.Vector2) -> Bullet {
-	return Bullet{pos = pos, dir = dir, speed = 1000.0, color = rl.Color{255, 180, 115, 255}}
+	return Bullet {
+		pos = pos,
+		dir = dir,
+		speed = 1000.0,
+		color = rl.Color{255, 180, 115, 255},
+		radius = 8.0,
+	}
 }
 
 update_bullet :: proc(bullet: ^Bullet, dt: f32) -> bool {
@@ -131,7 +156,7 @@ update_bullet :: proc(bullet: ^Bullet, dt: f32) -> bool {
 }
 
 draw_bullet :: proc(bullet: Bullet) {
-	rl.DrawCircleLinesV(bullet.pos, 8.0, bullet.color)
+	rl.DrawCircleLinesV(bullet.pos, bullet.radius, bullet.color)
 }
 
 EnemySpawner :: struct {
@@ -160,10 +185,13 @@ update_enemy_spawner :: proc(spawner: ^EnemySpawner, dt: f32) {
 }
 
 Enemy :: struct {
-	rect:     rl.Rectangle,
-	color:    rl.Color,
-	speed:    f32,
-	min_dist: f32,
+	rect:          rl.Rectangle,
+	color:         rl.Color,
+	speed:         f32,
+	min_dist:      f32,
+	damaged:       bool,
+	damaged_color: rl.Color,
+	damaged_timer: Timer,
 }
 
 create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
@@ -184,6 +212,9 @@ create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
 		color = {247, 76, 252, 255},
 		min_dist = 200.0,
 		speed = 400.0,
+		damaged = false,
+		damaged_color = {255, 171, 247, 255},
+		damaged_timer = create_timer(0.1),
 	}
 }
 
@@ -193,7 +224,8 @@ update_enemy :: proc(
 	enemy_idx: int,
 	enemies: [dynamic]Enemy,
 	dt: f32,
-) {
+) -> bool {
+	enemy_dead: bool
 	dist := vec_dist(pos(e.rect), player_pos)
 	if dist > e.min_dist {
 		epos := pos(e.rect)
@@ -203,17 +235,31 @@ update_enemy :: proc(
 		for enemy, i in enemies {
 			if i != enemy_idx &&
 			   rl.CheckCollisionRecs({epos.x, epos.y, e.rect.width, e.rect.height}, enemy.rect) {
-				return
+				return enemy_dead
 			}
 		}
 
 		e.rect.x = epos.x
 		e.rect.y = epos.y
 	}
+
+	//damaged thingys
+	if e.damaged {
+		if finish_damaged_state := update_timer(&e.damaged_timer, dt); finish_damaged_state {
+			e.damaged = false
+			enemy_dead = true
+		}
+	}
+
+	return enemy_dead
 }
 
 draw_enemy :: proc(enemy: Enemy) {
-	rl.DrawRectangleLinesEx(enemy.rect, 3.0, enemy.color)
+	if enemy.damaged {
+		rl.DrawRectangleLinesEx(enemy.rect, 3.0, enemy.damaged_color)
+	} else {
+		rl.DrawRectangleLinesEx(enemy.rect, 3.0, enemy.color)
+	}
 }
 
 @(export)
@@ -254,7 +300,21 @@ game_update :: proc() -> bool {
 	}
 	update_enemy_spawner(&g_mem.enemy_spawner, dt)
 	for &enemy, i in g_mem.enemy_spawner.enemies {
-		update_enemy(&enemy, g_mem.player.pos, i, g_mem.enemy_spawner.enemies, dt)
+		for bullet in g_mem.player.bullets {
+			if rl.CheckCollisionCircleRec(bullet.pos, bullet.radius, enemy.rect) {
+				enemy.damaged = true
+			}
+		}
+
+		if delete_enemy := update_enemy(
+			&enemy,
+			g_mem.player.pos,
+			i,
+			g_mem.enemy_spawner.enemies,
+			dt,
+		); delete_enemy {
+			unordered_remove(&g_mem.enemy_spawner.enemies, i)
+		}
 	}
 
 	if rl.IsKeyPressed(.I) {
