@@ -2,12 +2,15 @@ package game
 
 import "core:fmt"
 import "core:math"
+import "core:math/rand"
 import rl "vendor:raylib"
 
 _ :: fmt
 
 Game_Memory :: struct {
-	player: Player,
+	player:  Player,
+	enemies: [dynamic]Enemy,
+	timer:   f32,
 }
 
 g_mem: ^Game_Memory
@@ -106,7 +109,7 @@ Bullet :: struct {
 }
 
 create_bullet :: proc(pos, dir: rl.Vector2) -> Bullet {
-	return Bullet{pos = pos, dir = dir, speed = 1000.0, color = rl.RED}
+	return Bullet{pos = pos, dir = dir, speed = 1000.0, color = rl.Color{255, 180, 115, 255}}
 }
 
 update_bullet :: proc(bullet: ^Bullet, dt: f32) -> bool {
@@ -116,6 +119,35 @@ update_bullet :: proc(bullet: ^Bullet, dt: f32) -> bool {
 		return true
 	}
 	return false
+}
+
+draw_bullet :: proc(bullet: Bullet) {
+	rl.DrawCircleV(bullet.pos, 8.0, bullet.color)
+}
+
+Enemy :: struct {
+	rect:  rl.Rectangle,
+	color: rl.Color,
+}
+
+create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
+	x := (rand.int31() % (Width - 150)) + 75
+	y := (rand.int31() % (Height - 150)) + 75
+	i := 0
+	for i < len(enemies) {
+		if rl.CheckCollisionRecs(enemies[i].rect, {f32(x), f32(y), 40.0, 40.0}) {
+			x = (rand.int31() % (Width - 150)) + 75
+			y = (rand.int31() % (Height - 150)) + 75
+			i = 0
+		}
+
+		i += 1
+	}
+	return Enemy{rect = {f32(x), f32(y), 40.0, 40.0}, color = {247, 76, 252, 255}}
+}
+
+draw_enemy :: proc(enemy: Enemy) {
+	rl.DrawRectangleLinesEx(enemy.rect, 3.0, enemy.color)
 }
 
 @(export)
@@ -153,14 +185,29 @@ game_update :: proc() -> bool {
 			unordered_remove(&g_mem.player.bullets, i)
 		}
 	}
-	fmt.println(len(g_mem.player.bullets))
+
+	if rl.IsKeyPressed(.P) {
+		append(&g_mem.enemies, create_enemy(g_mem.enemies))
+	}
+	if rl.IsKeyPressed(.I) {
+		clear(&g_mem.enemies)
+	}
+
+	g_mem.timer += dt
+	if g_mem.timer >= 0.25 {
+		append(&g_mem.enemies, create_enemy(g_mem.enemies))
+		g_mem.timer = 0.0
+	}
 
 	rl.BeginDrawing()
 	rl.ClearBackground(rl.BLACK)
 
 	draw_player_triangle(g_mem.player)
 	for bullet in g_mem.player.bullets {
-		rl.DrawCircleV(bullet.pos, 10.0, bullet.color)
+		draw_bullet(bullet)
+	}
+	for enemy in g_mem.enemies {
+		draw_enemy(enemy)
 	}
 
 	rl.DrawLineEx(g_mem.player.pos, g_mem.player.pos + g_mem.player.dir * 50, 5, rl.ORANGE)
@@ -172,6 +219,7 @@ game_update :: proc() -> bool {
 @(export)
 game_shutdown :: proc() {
 	delete(g_mem.player.bullets)
+	delete(g_mem.enemies)
 	free(g_mem)
 }
 
