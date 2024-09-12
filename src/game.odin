@@ -64,19 +64,20 @@ vec_dist :: proc(v1, v2: rl.Vector2) -> f32 {
 Timer :: struct {
 	time:     f32,
 	max_time: f32,
-	finished: bool,
 }
 
 create_timer :: proc(max_time: f32) -> Timer {
-	return Timer{time = 0.0, max_time = max_time, finished = false}
+	return Timer{time = 0.0, max_time = max_time}
 }
 
 update_timer :: proc(timer: ^Timer, dt: f32) -> bool {
+	finished := false
 	timer.time += dt
 	if timer.time >= timer.max_time {
-		timer.finished = true
+		finished = true
+		timer.time = 0.0
 	}
-	return timer.finished
+	return finished
 }
 
 Player :: struct {
@@ -169,7 +170,7 @@ EnemySpawner :: struct {
 create_enemy_spawner :: proc() -> EnemySpawner {
 	return EnemySpawner {
 		enemies = make([dynamic]Enemy, context.allocator),
-		max_enemy_count = 10,
+		max_enemy_count = 5,
 		time_btw_spawns = 1.0,
 	}
 }
@@ -192,6 +193,7 @@ Enemy :: struct {
 	damaged:       bool,
 	damaged_color: rl.Color,
 	damaged_timer: Timer,
+	health:        int,
 }
 
 create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
@@ -214,7 +216,8 @@ create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
 		speed = 400.0,
 		damaged = false,
 		damaged_color = {255, 171, 247, 255},
-		damaged_timer = create_timer(0.1),
+		damaged_timer = create_timer(0.2),
+		health = 100,
 	}
 }
 
@@ -247,7 +250,10 @@ update_enemy :: proc(
 	if e.damaged {
 		if finish_damaged_state := update_timer(&e.damaged_timer, dt); finish_damaged_state {
 			e.damaged = false
-			enemy_dead = true
+			e.health -= 20
+			if e.health <= 0 {
+				enemy_dead = true
+			}
 		}
 	}
 
