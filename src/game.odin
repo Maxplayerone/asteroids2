@@ -8,9 +8,8 @@ import rl "vendor:raylib"
 _ :: fmt
 
 Game_Memory :: struct {
-	player:  Player,
-	enemies: [dynamic]Enemy,
-	timer:   f32,
+	player:        Player,
+	enemy_spawner: EnemySpawner,
 }
 
 g_mem: ^Game_Memory
@@ -50,6 +49,16 @@ angle_btw_vecs :: proc(v1, v2: rl.Vector2) -> f32 {
 		v1.x * v2.x +
 		v1.y * v2.y / math.sqrt(v1.x * v1.x + v1.y * v1.y) * math.sqrt(v2.x * v2.x + v2.y * v2.y),
 	)
+}
+
+pos :: proc(rect: rl.Rectangle) -> rl.Vector2 {
+	return rl.Vector2{rect.x, rect.y}
+}
+
+vec_dist :: proc(v1, v2: rl.Vector2) -> f32 {
+	dx := v1.x - v2.x
+	dy := v1.y - v2.y
+	return math.sqrt(dx * dx + dy * dy)
 }
 
 Player :: struct {
@@ -122,12 +131,39 @@ update_bullet :: proc(bullet: ^Bullet, dt: f32) -> bool {
 }
 
 draw_bullet :: proc(bullet: Bullet) {
-	rl.DrawCircleV(bullet.pos, 8.0, bullet.color)
+	rl.DrawCircleLinesV(bullet.pos, 8.0, bullet.color)
+}
+
+EnemySpawner :: struct {
+	time_btw_spawns: f32,
+	timer:           f32,
+	max_enemy_count: int,
+	enemies:         [dynamic]Enemy,
+}
+
+create_enemy_spawner :: proc() -> EnemySpawner {
+	return EnemySpawner {
+		enemies = make([dynamic]Enemy, context.allocator),
+		max_enemy_count = 10,
+		time_btw_spawns = 1.0,
+	}
+}
+
+update_enemy_spawner :: proc(spawner: ^EnemySpawner, dt: f32) {
+	spawner.timer += dt
+	if spawner.timer >= spawner.time_btw_spawns {
+		if len(spawner.enemies) < spawner.max_enemy_count {
+			append(&spawner.enemies, create_enemy(spawner.enemies))
+		}
+		spawner.timer = 0.0
+	}
 }
 
 Enemy :: struct {
-	rect:  rl.Rectangle,
-	color: rl.Color,
+	rect:     rl.Rectangle,
+	color:    rl.Color,
+	speed:    f32,
+	min_dist: f32,
 }
 
 create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
@@ -143,7 +179,37 @@ create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
 
 		i += 1
 	}
-	return Enemy{rect = {f32(x), f32(y), 40.0, 40.0}, color = {247, 76, 252, 255}}
+	return Enemy {
+		rect = {f32(x), f32(y), 40.0, 40.0},
+		color = {247, 76, 252, 255},
+		min_dist = 200.0,
+		speed = 400.0,
+	}
+}
+
+update_enemy :: proc(
+	e: ^Enemy,
+	player_pos: rl.Vector2,
+	enemy_idx: int,
+	enemies: [dynamic]Enemy,
+	dt: f32,
+) {
+	dist := vec_dist(pos(e.rect), player_pos)
+	if dist > e.min_dist {
+		epos := pos(e.rect)
+		dir := rl.Vector2Normalize(player_pos - epos)
+		epos += dir * e.speed * dt
+
+		for enemy, i in enemies {
+			if i != enemy_idx &&
+			   rl.CheckCollisionRecs({epos.x, epos.y, e.rect.width, e.rect.height}, enemy.rect) {
+				return
+			}
+		}
+
+		e.rect.x = epos.x
+		e.rect.y = epos.y
+	}
 }
 
 draw_enemy :: proc(enemy: Enemy) {
@@ -169,7 +235,8 @@ game_init :: proc() {
 	}
 
 	g_mem^ = Game_Memory {
-		player = player,
+		player        = player,
+		enemy_spawner = create_enemy_spawner(),
 	}
 
 	game_hot_reloaded(g_mem)
@@ -185,18 +252,13 @@ game_update :: proc() -> bool {
 			unordered_remove(&g_mem.player.bullets, i)
 		}
 	}
-
-	if rl.IsKeyPressed(.P) {
-		append(&g_mem.enemies, create_enemy(g_mem.enemies))
+	update_enemy_spawner(&g_mem.enemy_spawner, dt)
+	for &enemy, i in g_mem.enemy_spawner.enemies {
+		update_enemy(&enemy, g_mem.player.pos, i, g_mem.enemy_spawner.enemies, dt)
 	}
+
 	if rl.IsKeyPressed(.I) {
-		clear(&g_mem.enemies)
-	}
-
-	g_mem.timer += dt
-	if g_mem.timer >= 0.25 {
-		append(&g_mem.enemies, create_enemy(g_mem.enemies))
-		g_mem.timer = 0.0
+		clear(&g_mem.enemy_spawner.enemies)
 	}
 
 	rl.BeginDrawing()
@@ -206,7 +268,7 @@ game_update :: proc() -> bool {
 	for bullet in g_mem.player.bullets {
 		draw_bullet(bullet)
 	}
-	for enemy in g_mem.enemies {
+	for enemy in g_mem.enemy_spawner.enemies {
 		draw_enemy(enemy)
 	}
 
@@ -219,7 +281,7 @@ game_update :: proc() -> bool {
 @(export)
 game_shutdown :: proc() {
 	delete(g_mem.player.bullets)
-	delete(g_mem.enemies)
+	delete(g_mem.enemy_spawner.enemies)
 	free(g_mem)
 }
 
