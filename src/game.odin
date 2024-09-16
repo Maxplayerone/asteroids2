@@ -33,6 +33,8 @@ get_triangle_from_pos_and_radius :: proc(
 	return top_vertex, left_vertex, right_vertex
 }
 
+
+//---------math related procedures-------------
 rotate_point_around_point :: proc(v1, v2: rl.Vector2, angle: f32) -> rl.Vector2 {
 	v1 := v1
 	v1 -= v2
@@ -59,6 +61,32 @@ vec_dist :: proc(v1, v2: rl.Vector2) -> f32 {
 	dx := v1.x - v2.x
 	dy := v1.y - v2.y
 	return math.sqrt(dx * dx + dy * dy)
+}
+
+
+//--------------rect related procedures-------------
+rect_shrink :: proc(rect: rl.Rectangle, shrink_amount: f32 = 2.0) -> rl.Rectangle {
+	return rl.Rectangle {
+		rect.x + shrink_amount,
+		rect.y + shrink_amount,
+		rect.width - 2 * shrink_amount,
+		rect.height - 2 * shrink_amount,
+	}
+}
+
+rect_slice_per :: proc(rect: rl.Rectangle, slice_per: f32) -> rl.Rectangle {
+	return rl.Rectangle{rect.x, rect.y, rect.width * slice_per, rect.height}
+}
+
+collission_mouse_rect :: proc(rect: rl.Rectangle) -> bool {
+	pos := rl.GetMousePosition()
+	if pos.x > rect.x &&
+	   pos.x < rect.x + rect.width &&
+	   pos.y > rect.y &&
+	   pos.y < rect.y + rect.height {
+		return true
+	}
+	return false
 }
 
 Timer :: struct {
@@ -170,7 +198,7 @@ EnemySpawner :: struct {
 create_enemy_spawner :: proc() -> EnemySpawner {
 	return EnemySpawner {
 		enemies = make([dynamic]Enemy, context.allocator),
-		max_enemy_count = 5,
+		max_enemy_count = 1,
 		time_btw_spawns = 1.0,
 	}
 }
@@ -213,12 +241,31 @@ create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
 		rect = {f32(x), f32(y), 40.0, 40.0},
 		color = {247, 76, 252, 255},
 		min_dist = 200.0,
-		speed = 400.0,
+		speed = 200.0,
 		damaged = false,
 		damaged_color = {255, 171, 247, 255},
 		damaged_timer = create_timer(0.2),
 		health = 100,
 	}
+}
+
+draw_healthbar :: proc(
+	bar_rect: rl.Rectangle,
+	max_hp, current_hp: int,
+	healthbar_color := rl.RED,
+) {
+	fmt.println(current_hp, max_hp)
+	inner_rect := rect_slice_per(rect_shrink(bar_rect, 3.0), f32(current_hp) / f32(max_hp))
+	rl.DrawRectangleRec(bar_rect, rl.LIGHTGRAY)
+	rl.DrawRectangleRec(inner_rect, healthbar_color)
+}
+
+get_healthbar_rect :: proc(
+	pos: rl.Vector2,
+	size := rl.Vector2{40.0, 20.0},
+	offset_y: f32 = 30.0,
+) -> rl.Rectangle {
+	return rl.Rectangle{pos.x, pos.y - f32(offset_y), size.x, size.y}
 }
 
 update_enemy :: proc(
@@ -244,6 +291,10 @@ update_enemy :: proc(
 
 		e.rect.x = epos.x
 		e.rect.y = epos.y
+	}
+
+	if collission_mouse_rect(e.rect) {
+		draw_healthbar(get_healthbar_rect(pos(e.rect)), 100, e.health)
 	}
 
 	//damaged thingys
@@ -299,11 +350,7 @@ game_update :: proc() -> bool {
 	dt := rl.GetFrameTime()
 
 	update_player(&g_mem.player, dt)
-	for &bullet, i in g_mem.player.bullets {
-		if delete_bullet := update_bullet(&bullet, dt); delete_bullet {
-			unordered_remove(&g_mem.player.bullets, i)
-		}
-	}
+
 	update_enemy_spawner(&g_mem.enemy_spawner, dt)
 	for &enemy, i in g_mem.enemy_spawner.enemies {
 		for bullet in g_mem.player.bullets {
@@ -320,6 +367,12 @@ game_update :: proc() -> bool {
 			dt,
 		); delete_enemy {
 			unordered_remove(&g_mem.enemy_spawner.enemies, i)
+		}
+	}
+
+	for &bullet, i in g_mem.player.bullets {
+		if delete_bullet := update_bullet(&bullet, dt); delete_bullet {
+			unordered_remove(&g_mem.player.bullets, i)
 		}
 	}
 
