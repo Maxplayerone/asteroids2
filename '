@@ -108,19 +108,6 @@ update_timer :: proc(timer: ^Timer, dt: f32) -> bool {
 	return finished
 }
 
-update_timer_manual :: proc(timer: ^Timer, dt: f32) -> bool {
-	timer.time += dt
-	return timer.time >= timer.max_time
-}
-
-reset_timer_manual :: proc(timer: ^Timer) {
-	timer.time = 0.0
-}
-
-draw_timer :: proc(timer: Timer, name: string) {
-	fmt.println(name, ": ", timer.time, " | ", timer.max_time)
-}
-
 Player :: struct {
 	pos:     rl.Vector2,
 	radius:  f32,
@@ -204,38 +191,27 @@ draw_bullet :: proc(bullet: Bullet) {
 }
 
 EnemySpawner :: struct {
-	time_btw_spawns:        Timer,
-	max_enemy_count:        int,
-	enemies:                [dynamic]Enemy,
-	//spawn particle stuff
-	particle_spanwer_timer: Timer,
-	spawn_particles_flag:   bool,
-	spawn_particle:         Particle,
+	time_btw_spawns: f32,
+	timer:           f32,
+	max_enemy_count: int,
+	enemies:         [dynamic]Enemy,
 }
 
 create_enemy_spawner :: proc() -> EnemySpawner {
 	return EnemySpawner {
 		enemies = make([dynamic]Enemy, context.allocator),
-		time_btw_spawns = create_timer(1.0),
-		particle_spanwer_timer = create_timer(1.5),
 		max_enemy_count = 1,
+		time_btw_spawns = 1.0,
 	}
 }
 
 update_enemy_spawner :: proc(spawner: ^EnemySpawner, dt: f32) {
-	if spawner.spawn_particles_flag {
-		if ready_to_spawn := update_timer(&spawner.particle_spanwer_timer, dt); ready_to_spawn {
-			append(&spawner.enemies, create_enemy_with_pos(spawner.spawn_particle.pos))
-			spawner.spawn_particles_flag = false
+	spawner.timer += dt
+	if spawner.timer >= spawner.time_btw_spawns {
+		if len(spawner.enemies) < spawner.max_enemy_count {
+			append(&spawner.enemies, create_enemy(spawner.enemies))
 		}
-		draw_particle(spawner.spawn_particle)
-		return
-	}
-
-	if ready_to_spawn := update_timer(&spawner.time_btw_spawns, dt);
-	   ready_to_spawn && len(spawner.enemies) < spawner.max_enemy_count {
-		spawner.spawn_particles_flag = true
-		spawner.spawn_particle = create_particle(get_new_enemy_pos(spawner.enemies))
+		spawner.timer = 0.0
 	}
 }
 
@@ -263,46 +239,24 @@ create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
 
 		i += 1
 	}
-
-	return create_enemy_with_pos({f32(x), f32(y)})
-}
-
-create_enemy_with_pos :: proc(pos: rl.Vector2) -> Enemy {
 	return Enemy {
-		rect = {pos.x, pos.y, 40.0, 40.0},
+		rect = {f32(x), f32(y), 40.0, 40.0},
 		color = {247, 76, 252, 255},
 		min_dist = 200.0,
 		speed = 200.0,
 		damaged = false,
 		damaged_color = {255, 171, 247, 255},
-		damaged_timer = create_timer(0.1),
+		damaged_timer = create_timer(0.2),
 		health = 100,
 	}
 }
-
-get_new_enemy_pos :: proc(enemies: [dynamic]Enemy) -> rl.Vector2 {
-	x := (rand.int31() % (Width - 150)) + 75
-	y := (rand.int31() % (Height - 150)) + 75
-	i := 0
-	for i < len(enemies) {
-		if rl.CheckCollisionRecs(enemies[i].rect, {f32(x), f32(y), 40.0, 40.0}) {
-			x = (rand.int31() % (Width - 150)) + 75
-			y = (rand.int31() % (Height - 150)) + 75
-			i = 0
-		}
-
-		i += 1
-	}
-
-	return rl.Vector2{f32(x), f32(y)}
-}
-
 
 draw_healthbar :: proc(
 	bar_rect: rl.Rectangle,
 	max_hp, current_hp: int,
 	healthbar_color := rl.RED,
 ) {
+	fmt.println(current_hp, max_hp)
 	inner_rect := rect_slice_per(rect_shrink(bar_rect, 3.0), f32(current_hp) / f32(max_hp))
 	rl.DrawRectangleRec(bar_rect, rl.LIGHTGRAY)
 	rl.DrawRectangleRec(inner_rect, healthbar_color)
@@ -369,27 +323,6 @@ draw_enemy :: proc(enemy: Enemy) {
 	}
 }
 
-Particle :: struct {
-	pos:           rl.Vector2,
-	color:         rl.Color,
-	max_particle:  int,
-	starting_size: f32,
-}
-
-create_particle :: proc(pos: rl.Vector2) -> Particle {
-	return Particle {
-		pos = pos,
-		color = rl.Color{254, 99, 189, 255},
-		max_particle = 20,
-		starting_size = 20.0,
-	}
-
-}
-
-draw_particle :: proc(particle: Particle) {
-	rl.DrawCircleV(particle.pos, particle.starting_size, particle.color)
-}
-
 @(export)
 game_init_window :: proc() {
 	rl.InitWindow(1280, 720, "Odin + Raylib + Hot Reload template!")
@@ -437,7 +370,7 @@ game_update :: proc() -> bool {
 			i,
 			g_mem.enemy_spawner.enemies,
 			dt,
-			g_mem.player.damage,
+			player.damage,
 		); delete_enemy {
 			unordered_remove(&g_mem.enemy_spawner.enemies, i)
 		}
