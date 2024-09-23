@@ -63,6 +63,10 @@ vec_dist :: proc(v1, v2: rl.Vector2) -> f32 {
 	return math.sqrt(dx * dx + dy * dy)
 }
 
+to_deg :: proc(angle_rad: f32) -> f32 {
+	return angle_rad * 180.0 / math.PI
+}
+
 
 //--------------rect related procedures-------------
 rect_shrink :: proc(rect: rl.Rectangle, shrink_amount: f32 = 2.0) -> rl.Rectangle {
@@ -210,14 +214,14 @@ EnemySpawner :: struct {
 	//spawn particle stuff
 	particle_spanwer_timer: Timer,
 	spawn_particles_flag:   bool,
-	spawn_particle:         Particle,
+	spawn_particle:         ParticleInstance,
 }
 
 create_enemy_spawner :: proc() -> EnemySpawner {
 	return EnemySpawner {
 		enemies = make([dynamic]Enemy, context.allocator),
 		time_btw_spawns = create_timer(1.0),
-		particle_spanwer_timer = create_timer(1.5),
+		particle_spanwer_timer = create_timer(1.0),
 		max_enemy_count = 1,
 	}
 }
@@ -228,14 +232,16 @@ update_enemy_spawner :: proc(spawner: ^EnemySpawner, dt: f32) {
 			append(&spawner.enemies, create_enemy_with_pos(spawner.spawn_particle.pos))
 			spawner.spawn_particles_flag = false
 		}
-		draw_particle(spawner.spawn_particle)
+		update_particle_instance(&spawner.spawn_particle, dt)
+		draw_particle_instance(spawner.spawn_particle)
 		return
 	}
 
 	if ready_to_spawn := update_timer(&spawner.time_btw_spawns, dt);
 	   ready_to_spawn && len(spawner.enemies) < spawner.max_enemy_count {
 		spawner.spawn_particles_flag = true
-		spawner.spawn_particle = create_particle(get_new_enemy_pos(spawner.enemies))
+		delete(spawner.spawn_particle.particles)
+		spawner.spawn_particle = create_particle_instance(get_new_enemy_pos(spawner.enemies))
 	}
 }
 
@@ -369,25 +375,49 @@ draw_enemy :: proc(enemy: Enemy) {
 	}
 }
 
-Particle :: struct {
-	pos:           rl.Vector2,
-	color:         rl.Color,
-	max_particle:  int,
-	starting_size: f32,
+ParticleInstance :: struct {
+	pos:          rl.Vector2,
+	max_particle: int,
+	particles:    [dynamic]Particle,
 }
 
-create_particle :: proc(pos: rl.Vector2) -> Particle {
-	return Particle {
-		pos = pos,
-		color = rl.Color{254, 99, 189, 255},
-		max_particle = 20,
-		starting_size = 20.0,
+Particle :: struct {
+	pos:   rl.Vector2,
+	dir:   rl.Vector2,
+	size:  f32,
+	color: rl.Color,
+	speed: f32,
+}
+
+create_particle_instance :: proc(pos: rl.Vector2) -> ParticleInstance {
+	particles := make([dynamic]Particle)
+	color := rl.Color{254, 99, 189, 255}
+	size := f32(5.0)
+	speed := f32(50.0)
+	for _ in 0 ..< 20 {
+		angle := f32(rand.int31() % 6240) / 1000.0
+		dir := rotate_point_around_point({0.0, -1.0}, {0.0, 0.0}, angle)
+		append(
+			&particles,
+			Particle{pos = pos, dir = dir, size = size, color = color, speed = speed},
+		)
 	}
 
+	return ParticleInstance{pos = pos, max_particle = 20, particles = particles}
+
 }
 
-draw_particle :: proc(particle: Particle) {
-	rl.DrawCircleV(particle.pos, particle.starting_size, particle.color)
+update_particle_instance :: proc(inst: ^ParticleInstance, dt: f32) {
+	for &p in inst.particles {
+		p.pos += p.dir * p.speed * dt
+		p.speed *= 0.999
+	}
+}
+
+draw_particle_instance :: proc(inst: ParticleInstance) {
+	for p in inst.particles {
+		rl.DrawCircleV(p.pos, p.size, p.color)
+	}
 }
 
 @(export)
@@ -474,6 +504,7 @@ game_update :: proc() -> bool {
 game_shutdown :: proc() {
 	delete(g_mem.player.bullets)
 	delete(g_mem.enemy_spawner.enemies)
+	delete(g_mem.enemy_spawner.spawn_particle.particles)
 	free(g_mem)
 }
 
