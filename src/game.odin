@@ -57,6 +57,10 @@ pos :: proc(rect: rl.Rectangle) -> rl.Vector2 {
 	return rl.Vector2{rect.x, rect.y}
 }
 
+pos_center :: proc(rect: rl.Rectangle) -> rl.Vector2 {
+	return rl.Vector2{rect.x + rect.width / 2, rect.y + rect.height / 2}
+}
+
 vec_dist :: proc(v1, v2: rl.Vector2) -> f32 {
 	dx := v1.x - v2.x
 	dy := v1.y - v2.y
@@ -121,7 +125,7 @@ reset_timer_manual :: proc(timer: ^Timer) {
 	timer.time = 0.0
 }
 
-draw_timer :: proc(timer: Timer, name: string) {
+draw_timer :: proc(timer: Timer, name: string = "") {
 	fmt.println(name, ": ", timer.time, " | ", timer.max_time)
 }
 
@@ -245,15 +249,24 @@ update_enemy_spawner :: proc(spawner: ^EnemySpawner, dt: f32) {
 	}
 }
 
+EnemyState :: enum {
+	Shooting,
+	Walking,
+}
+
 Enemy :: struct {
-	rect:          rl.Rectangle,
-	color:         rl.Color,
-	speed:         f32,
-	min_dist:      f32,
-	damaged:       bool,
-	damaged_color: rl.Color,
-	damaged_timer: Timer,
-	health:        int,
+	rect:            rl.Rectangle,
+	color:           rl.Color,
+	speed:           f32,
+	min_dist:        f32,
+	damaged:         bool,
+	damaged_color:   rl.Color,
+	damaged_timer:   Timer,
+	health:          int,
+	state:           EnemyState,
+	time_btw_states: Timer,
+	time_btw_shots:  Timer,
+	bullets:         [dynamic]Bullet,
 }
 
 create_enemy :: proc(enemies: [dynamic]Enemy) -> Enemy {
@@ -283,6 +296,9 @@ create_enemy_with_pos :: proc(pos: rl.Vector2) -> Enemy {
 		damaged_color = {255, 171, 247, 255},
 		damaged_timer = create_timer(0.1),
 		health = 100,
+		state = .Walking,
+		time_btw_states = create_timer(2.0),
+		time_btw_shots = create_timer(0.5),
 	}
 }
 
@@ -322,48 +338,51 @@ get_healthbar_rect :: proc(
 	return rl.Rectangle{pos.x, pos.y - f32(offset_y), size.x, size.y}
 }
 
-update_enemy :: proc(
-	e: ^Enemy,
-	player_pos: rl.Vector2,
-	enemy_idx: int,
-	enemies: [dynamic]Enemy,
-	dt: f32,
-	damage: int,
-) -> bool {
-	enemy_dead: bool
-	dist := vec_dist(pos(e.rect), player_pos)
-	if dist > e.min_dist {
-		epos := pos(e.rect)
-		dir := rl.Vector2Normalize(player_pos - epos)
-		epos += dir * e.speed * dt
+update_enemy :: proc(e: ^Enemy, player_pos: rl.Vector2, dt: f32) {
 
-		for enemy, i in enemies {
-			if i != enemy_idx &&
-			   rl.CheckCollisionRecs({epos.x, epos.y, e.rect.width, e.rect.height}, enemy.rect) {
-				return enemy_dead
-			}
+	if timer_ready := update_timer(&e.time_btw_states, dt); timer_ready {
+		rand_state := rand.int31() % 2
+		if rand_state == 0 {
+			e.state = .Walking
+		} else if rand_state == 1 {
+			e.state = .Shooting
 		}
-
-		e.rect.x = epos.x
-		e.rect.y = epos.y
 	}
+
+	switch e.state {
+	case .Walking:
+		dist := vec_dist(pos(e.rect), player_pos)
+		if dist > e.min_dist {
+			epos := pos(e.rect)
+			dir := rl.Vector2Normalize(player_pos - epos)
+			epos += dir * e.speed * dt
+
+			e.rect.x = epos.x
+			e.rect.y = epos.y
+		}
+	case .Shooting:
+		if timer_ready := update_timer(&e.time_btw_shots, dt); timer_ready {
+			dir := rl.Vector2Normalize(player_pos - pos_center(e.rect))
+			append(&e.bullets, create_bullet(pos_center(e.rect), dir))
+		}
+	}
+
 
 	if collission_mouse_rect(e.rect) {
 		draw_healthbar(get_healthbar_rect(pos(e.rect)), 100, e.health)
 	}
 
-	//damaged thingys
 	if e.damaged {
 		if finish_damaged_state := update_timer(&e.damaged_timer, dt); finish_damaged_state {
 			e.damaged = false
-			e.health -= damage
-			if e.health <= 0 {
-				enemy_dead = true
-			}
 		}
 	}
+}
 
-	return enemy_dead
+damage_enemy :: proc(e: ^Enemy, damage: int) -> bool {
+	e.damaged = true
+	e.health -= damage
+	return e.health <= 0.0
 }
 
 draw_enemy :: proc(enemy: Enemy) {
@@ -452,30 +471,26 @@ game_update :: proc() -> bool {
 	dt := rl.GetFrameTime()
 
 	update_player(&g_mem.player, dt)
-
-	update_enemy_spawner(&g_mem.enemy_spawner, dt)
-	for &enemy, i in g_mem.enemy_spawner.enemies {
-		for bullet in g_mem.player.bullets {
-			if rl.CheckCollisionCircleRec(bullet.pos, bullet.radius, enemy.rect) {
-				enemy.damaged = true
-			}
-		}
-
-		if delete_enemy := update_enemy(
-			&enemy,
-			g_mem.player.pos,
-			i,
-			g_mem.enemy_spawner.enemies,
-			dt,
-			g_mem.player.damage,
-		); delete_enemy {
-			unordered_remove(&g_mem.enemy_spawner.enemies, i)
-		}
-	}
-
 	for &bullet, i in g_mem.player.bullets {
 		if delete_bullet := update_bullet(&bullet, dt); delete_bullet {
 			unordered_remove(&g_mem.player.bullets, i)
+		}
+	}
+
+	update_enemy_spawner(&g_mem.enemy_spawner, dt)
+
+	for &enemy, i in g_mem.enemy_spawner.enemies {
+		update_enemy(&enemy, g_mem.player.pos, dt)
+
+
+		for bullet, j in g_mem.player.bullets {
+			if rl.CheckCollisionCircleRec(bullet.pos, bullet.radius, enemy.rect) {
+				if damage_enemy(&enemy, g_mem.player.damage) {
+					delete(enemy.bullets)
+					unordered_remove(&g_mem.enemy_spawner.enemies, i)
+				}
+				unordered_remove(&g_mem.player.bullets, j)
+			}
 		}
 	}
 
@@ -503,6 +518,9 @@ game_update :: proc() -> bool {
 @(export)
 game_shutdown :: proc() {
 	delete(g_mem.player.bullets)
+	for enemy in g_mem.enemy_spawner.enemies {
+		delete(enemy.bullets)
+	}
 	delete(g_mem.enemy_spawner.enemies)
 	delete(g_mem.enemy_spawner.spawn_particle.particles)
 	free(g_mem)
