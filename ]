@@ -107,81 +107,6 @@ rect_with_outline :: proc(rect: rl.Rectangle, offset: f32 = 5.0) -> rl.Rectangle
 	return {rect.x - offset, rect.y - offset, rect.width + 2 * offset, rect.height + 2 * offset}
 }
 
-//-----------text related
-fit_text_in_line :: proc(text: string, scale: int, width: f32, min_scale := 15) -> int {
-	text_cstring := strings.clone_to_cstring(text, context.temp_allocator)
-	if f32(rl.MeasureText(text_cstring, i32(min_scale))) > width {
-		return 1000
-	}
-	scale := scale
-	for scale > min_scale {
-		if f32(rl.MeasureText(text_cstring, i32(scale))) < width {
-			break
-		}
-		scale -= 1
-	}
-	return scale
-}
-
-fit_text_in_column :: proc(scale: int, height: f32, min_scale: f32 = 15) -> int {
-	if f32(scale) < height {
-		return scale
-	} else if height >= min_scale {
-		return int(height)
-	} else {
-		return 1000
-	}
-}
-
-fit_text_in_rect :: proc(
-	text: string,
-	dims: rl.Vector2,
-	wanted_scale: int,
-	min_scale: f32 = 15,
-) -> int {
-	scale_x := fit_text_in_line(text, wanted_scale, dims.x, int(min_scale))
-	scale_y := fit_text_in_column(wanted_scale, dims.y, min_scale)
-
-	if scale_x < scale_y && scale_y != 1000 {
-		return scale_x
-	} else if scale_y < scale_x && scale_x != 1000 {
-		return scale_y
-	} else if scale_x == scale_y && scale_x != 1000 {
-		return scale_x
-	} else {
-		return 0
-	}
-}
-
-adjust_and_draw_text :: proc(
-	text: string,
-	rect: rl.Rectangle,
-	padding: rl.Vector2 = {10.0, 10.0},
-	wanted_scale: int = 100,
-	color := rl.BLACK,
-) {
-	scale := fit_text_in_rect(
-		text,
-		{rect.width - 2 * padding.x, rect.height - 2 * padding.y},
-		wanted_scale,
-	)
-
-	text_cstring := strings.clone_to_cstring(text, context.temp_allocator)
-	text_width := f32(rl.MeasureText(text_cstring, i32(scale)))
-
-	centering_padding := f32((rect.width - text_width) / 2)
-
-	if scale != 0 {
-		rl.DrawText(
-			text_cstring,
-			i32(rect.x + padding.x + centering_padding),
-			i32(rect.y + padding.y),
-			i32(scale),
-			color,
-		)
-	}
-}
-
 
 //------------timer related
 Timer :: struct {
@@ -241,23 +166,18 @@ xp_for_next_lvl :: proc(xp: int) -> (int, int) {
 
 draw_xp_bar :: proc(xp: int) {
 	xp_bar_outline := rl.Rectangle{500.0, Height - 75.0, 300.0, 50.0}
-	xp_bar := rect_without_outline(xp_bar_outline, 3.0)
+	//xp_bar := rect_without_outline(xp_bar_outline, 3.0)
 	rl.DrawRectangleRec(xp_bar_outline, rl.WHITE)
-
+	buf: [3]byte
 	xp_now, xp_required := xp_for_next_lvl(xp)
-	xp_ratio := f32(xp_now) / f32(xp_required)
-	rl.DrawRectangleRec(rect_slice_per(xp_bar, xp_ratio), rl.LIME)
-
-	buf: [16]byte
-	buf2: [16]byte
 	xp_now_str := strconv.itoa(buf[:], xp_now)
-	xp_required_str := strconv.itoa(buf2[:], xp_required)
+	xp_required_str := strconv.itoa(buf[:], xp_required)
 	xp_progress_str := strings.join(
 		{xp_now_str, xp_required_str},
 		sep = "/",
 		allocator = context.temp_allocator,
 	)
-	adjust_and_draw_text(xp_progress_str, xp_bar, color = rl.BLACK)
+	fmt.println(xp_progress_str)
 }
 
 
@@ -686,9 +606,6 @@ game_update :: proc() -> bool {
 	draw_xp_bar(g_mem.player.xp)
 
 	rl.EndDrawing()
-
-	free_all(context.temp_allocator)
-
 	return !rl.WindowShouldClose()
 }
 
